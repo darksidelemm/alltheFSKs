@@ -1,9 +1,7 @@
 #!/usr/bin/env python
-# MFSKSymbolDecoder.py - Taps into the MFSK Demodulator, and converts symbol values to bits.
+# MFSKSymbolDecoder.py - Helper class for processing of MFSK symbols.
 #
-# This code accepts the raw tone values from fldigi's MFSK16/32 demodulator (src/mfsk/mfsk.cpp), and produces a grey-decoded
-# bitstream. Currently the symbols are extracted from fldigi via print statements inserted into the fldigi codebase and piping,
-# but hopefully this will be modified to operate via TCP.
+# Probably not required anymore as everything is in ModemUtils.
 #
 # Copyright 2014 Mark Jessop <mark.jessop@adelaide.edu.au>
 # 
