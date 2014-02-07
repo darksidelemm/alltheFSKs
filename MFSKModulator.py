@@ -90,23 +90,19 @@ class MFSKModulator(object):
 
         for symb in bit_array:
             # Convert array bits to an integer.
-            print "Symb: " + str(symb)
             symb_int = symb.dot(1 << np.arange(symb.shape[-1] - 1, -1, -1))
-            print "SymbInt:" + str(symb_int)
             symb_int = gray_encode(symb_int) # Gray Coding.
-            print "SymbGray:" + str(symb_int)
             symb_array.append(symb_int)
 
         self.modulate_symbol(symb_array)
-        print str(symb_array)
         return symb_array
 
-# Test script.
+# Test scripts
 if __name__ == "__main__":
     # Instantiate a Thor8 Compatible modulator
     #mod = MFSKModulator(symbol_rate = 7.8125, tone_spacing = 7.8125*2, start_silence=5, base_freq=1500)
 
-    # MFSK16 Modulator
+    # MFSK16 compatible modulator
     mod = MFSKModulator(symbol_rate = 15.625, tone_spacing = 15.625, start_silence=0, base_freq=1500)
 
     # "CQ CQ CQ DE VK5QI VK5QI"

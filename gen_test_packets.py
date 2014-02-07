@@ -18,7 +18,6 @@
 
 import numpy as np 
 import MFSKModulator
-import ConvEncoder
 import Packetizer
 
 

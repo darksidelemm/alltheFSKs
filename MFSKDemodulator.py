@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # MFSKDemodulator.py - MFSK Demodulator
 #
-# Copyright 2013 Mark Jessop <mark.jessop@adelaide.edu.au>
+# Copyright 2014 Mark Jessop <mark.jessop@adelaide.edu.au>
 # 
 # This library is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Lesser General Public License as published by
@@ -30,6 +30,8 @@ class MFSKDemodulator(object):
     base_freq:      The frequncy of the lowest MFSK tone (Hz)
     symbol_rate:    Symbol rate of the MFSK modulation (baud)
     num_tones:      Number of tones in use. Tone spacing is assumed to be orthogonal (equal to the symbol rate).
+    callback:       Function pointer. A dictionary containing symbol information is passed to this function when
+                    a symbol is detected.
 
     """
     def __init__(self, sample_rate=8000, base_freq=1500, symbol_rate=15.625, num_tones = 16, callback = False):
@@ -50,8 +52,8 @@ class MFSKDemodulator(object):
         self.symbol_length = int(round(self.fs/self.symbol_rate))
         # Calculate how far we need to move the signal to align it over a FFT bin (usually not far)
         self.mixing_freq = round(self.base_freq/self.symbol_rate)*self.symbol_rate - self.base_freq
+        # Location of 'tone zero' in the symbol-length FFT.
         self.tone_zero = int(round(self.base_freq/self.symbol_rate))
-        self.center_freq = self.base_freq + (self.num_tones-1)*self.tone_spacing
 
         # Instantiate our local buffers.
         self.sample_buffer = np.zeros( self.symbol_length*self.buffer_size, dtype=np.complex )
@@ -73,27 +75,35 @@ class MFSKDemodulator(object):
 
     def consume(self,data):
         """
-        Consumes incoming data samples, hilbert transforms, mixes to baseband, then passes it onto the symbol tracker.
+        Consumes incoming data samples, mixes such that the data aligns over a FFT bin then passes it onto the symbol tracker.
 
-        data: Numpy float array.
+        data: Numpy float array. Preferably 2^n samples long, but doesn't matter so much.
         """
 
         # Type checking
 
         # Hilbert transform to get the analytic (single-sided) signal.
+        # We don't actually need to do this.
         #data = hilbert(data)
 
         # Mix the signal so that it lines up with a FFT bin.
         data = data*hilbert(np.cos(2.0*np.pi*(self.mixing_freq/self.fs)*np.arange(self.mixing_phase,self.mixing_phase+data.size)))
         self.mixing_phase = self.mixing_phase + len(data)
 
-        # Feed data to symbol_detector, X samples at a time.
+        # Feed data to symbol_detector, 1 sample at a time.
+        # TODO: Make the symbol_detect function process more than on sample at a time.
         for sample in data:
             self.symbol_detect(sample)
 
 
 
     def symbol_detect(self,samples):
+        """
+        Consumes a sample of data, adding it to a buffer and looking for the beginning of a symbol period.
+
+        TODO: Make this handle multiple samples at a time, with a possible performance hit.
+
+        """
         # Roll buffers.
         self.sample_buffer = np.roll(self.sample_buffer,-1)
         self.max_fft_energy_buffer = np.roll(self.max_fft_energy_buffer, -1)
@@ -104,15 +114,19 @@ class MFSKDemodulator(object):
 
         # Calculate FFT over the last (symbol_length) samples in the buffer
         fft_instant = np.fft.fft(self.sample_buffer[-1*self.symbol_length:])
+        # Add the relevant bins to a buffer.
         self.fft_energy_buffer[:,-1] = fft_instant[self.tone_zero:self.tone_zero+self.num_tones]
+        # Add the maximum bin to the end of another buffer for signal energy detection.
         self.max_fft_energy_buffer[-1] = np.max(np.absolute(self.fft_energy_buffer[:,-1]))
 
         # Calculate single-point DFT phase at (symbol_rate) Hz over the max fft energy buffer
         dft_energy = np.angle( self.max_fft_energy_buffer.dot(np.exp(-2*np.pi*1j * (self.symbol_rate/self.fs) * np.arange(0,len(self.max_fft_energy_buffer))))) % (2*np.pi)
+        # Save the dft phase value for debugging purposes
         self.dft_phase = np.append(self.dft_phase, dft_energy)
 
-        # Probably inefficient zero crossing detection.
-        if(dft_energy<0.1 and self.last_dftphase > 6.0):#
+        # Detect the zero crossing of the DFT phase. This indicates that the last (symbol_length) symbols
+        # in the buffer contain a symbol.
+        if(dft_energy<0.1 and self.last_dftphase > 6.0):
             self.hard_decode()
             self.eval_s2n()
 
@@ -123,6 +137,7 @@ class MFSKDemodulator(object):
             if self.callback != False:
                 self.callback(symbol_stats)
 
+        # Initial attempt at flywheeling when no zero crossings are detected.
         if self.symbol_gap > self.symbol_length:
             logging.debug("Flywheeling...")
 
@@ -136,6 +151,7 @@ class MFSKDemodulator(object):
             if self.callback != False:
                 self.callback(symbol_stats)
 
+        # Increment counters.
         self.symbol_gap += 1
         self.sample_count = self.sample_count + 1
         self.last_dftphase = dft_energy
@@ -158,13 +174,20 @@ class MFSKDemodulator(object):
 
         return self.currsymbol#gray_decode(symbol)
 
+
     def decayavg(self, average, input, weight):
+        """ 
+        Decaying average, ported from fldigi.
+        """
         if (weight <= 1.0):
             return input;
         else:
             return input * (1.0/weight) + average * (1.0 - (1.0/weight))
 
     def eval_s2n(self):
+        """
+        SNR Estimation, using FFT bin magnitudes. Ported from fldigi.
+        """
         sig = np.absolute(self.fft_energy_buffer[:,-1][self.currsymbol])
         noise = (self.num_tones-1) * np.absolute(self.fft_energy_buffer[:,-1][self.last_symbol2])
         if(noise>0):

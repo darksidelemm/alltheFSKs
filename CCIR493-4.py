@@ -1,6 +1,15 @@
 #!/usr/bin/env python
 # CCIR493-4.py - CCIR-493-4 HF SELCALL Implementation
 #
+# Ported from the C implementation in the QITX project.
+#
+# This implementation is based partly on the CCIR 493-9 specification,
+# and partly on reverse engineered SELCALL packets transmitted from a commercial
+# HF radio.
+#    
+# CCIR 493-9 is available here: http://hflink.com/selcall/ITU-R%20M.493-9%20specification.pdf
+# I can't find a complete copy of CCIR 493-4 anywhere...
+#   
 # Copyright 2013 Mark Jessop <mark.jessop@adelaide.edu.au>
 # 
 # This library is free software: you can redistribute it and/or modify
@@ -17,9 +26,6 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import MFSKModulator as mfsk
-
-SOURCE_ADDR = 1881
-DEST_ADDR = 1882
 
 # Some defines for SELCALL Codes.
 SEL_SEL = 120     # Selective call
@@ -42,6 +48,11 @@ def preamble(modulator):
         modulator.modulate_symbol([0,1])
 
 def selcall_get_word(value):
+    """
+    A CCIR 493-4 word consists of a 7-bit word number (0-127), and a 3-bit parity,
+    which is the number of 0's in the word.
+    The 7-bit word number is send LSB first, then the parity MSB first.
+    """
     accum = 0
     lookuptable = [0x0000,0x0200,0x0100,0x0300,0x0080,0x0280,0x0180,0x0380]
     for i in range(0,7):
@@ -51,6 +62,9 @@ def selcall_get_word(value):
     return (value&0x007F)|lookuptable[accum&0x007F]
 
 def selcall_send_word(modulator,symb):
+    """
+    Modulate a word using the MFSK Modulator.
+    """
     if(symb>128):
         return
 
@@ -64,7 +78,12 @@ def selcall_send_word(modulator,symb):
         current_word = current_word >>1
 
 def selcall_send_message(modulator,message):
+    """
+    Modulate a selcall message.
+    """
     preamble(modulator)
+
+    # CCIR 493-9 specifies error correction, but this is not required for CCIR 493-4.
 
     # Send Phasing pattern.
     selcall_send_word(modulator,SEL_PDX) # PDX
@@ -84,6 +103,10 @@ def selcall_send_message(modulator,message):
         selcall_send_word(modulator,symb)
 
 def selcall_call(modulator,source,dest):
+    """
+    Call a 4-digit destination address.
+    On most commercial HF radios (Codan, Barrett), this will make the radio ring.
+    """
     addr_A1 = (source/100)%100
     addr_A2 = (source%100)
     addr_B1 = (dest/100)%100
@@ -94,6 +117,11 @@ def selcall_call(modulator,source,dest):
     selcall_send_message(modulator,callmsg)
 
 def selcall_chan_test(modulator,source,dest):
+    """
+    Perform a channel test to a 4-digit selcall address, which causes the recepient
+    radio to respond with a 'High-Low-Low-Low-Low' tone sequence.
+    This is only confirmed to work with Codan radios.
+    """
     addr_A1 = (source/100)%100
     addr_A2 = (source%100)
     addr_B1 = (dest/100)%100
@@ -103,7 +131,12 @@ def selcall_chan_test(modulator,source,dest):
 
     selcall_send_message(modulator,callmsg)
 
-modulator = mfsk.MFSKModulator(48000,1700,100,170,30,0.5)
+# Test script. Generates a channel test waveform.
+if __name__ == "__main__":
+    # 1700Hz base tone, 100 baud, 170Hz shift. 30 symbols of silence at the start.
+    # NOTE: The tone spacing for this mode is NOT orthogonal. This means the generated waveform will not have
+    # constant phase. Sideband can be removed by bandpass filtering the generated signal.
+    modulator = mfsk.MFSKModulator(48000,1700,100,170,30,0.5)
 
-selcall_chan_test(modulator,1882,1881)
-modulator.write_wave('selcall_test_1882_1881.wav')
+    selcall_chan_test(modulator,1882,1881)
+    modulator.write_wave('selcall_test_1882_1881.wav')
