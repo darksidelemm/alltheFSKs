@@ -10,11 +10,17 @@ This modulator is in no way optimized, and at the time of writing runs approxima
 Classes:
 --------
 MFSKModulator - Constant Amplitude, Continuous Phase, Orthogonal MFSK Modulator
+
 MFSKDemodulator - Orthogonal MFSK Demodulator
+
 Packetizer - Message packetizer, as per https://docs.google.com/document/d/1fwUtzFUhTzwjHrbfUayRG5sM_3TzdPlPgWjwXnY8fsU/edit
+
 DePacketizer - What it says on the tin. Extracts packets from a bitstream, according to the above doc.
+
 ModemUtils - Helper functions for grey coding and symbol to bitstream conversion.
+
 MFSKSymbolDecoder - Badly named, superfluous helper class, which I'll likely remove shortly.
+
 crc16   - CCITT CRC16 implementation. Should probably be using the internal python one instead.
 
 
@@ -23,7 +29,9 @@ CCIR493-3 - Implementation of the 'HF SELCALL' standard, as used by Codan and Ba
 Test scripts:
 -------------
 gen_test_packets.py - Generates a wave file containing MFSK modulated packets.
+
 demod_tests.py - Attempt to demodulate the above using the MFSK Demodulator
+
 demod_SER/BER.py - Run error tests for different Eb/No figures, to validate the modem.
 
 
