@@ -34,13 +34,16 @@ class MFSKDemodulator(object):
                     a symbol is detected.
 
     """
-    def __init__(self, sample_rate=8000, base_freq=1500, symbol_rate=15.625, num_tones = 16, callback = False):
+    def __init__(self, sample_rate=8000, base_freq=1500, symbol_rate=15.625, num_tones = 16, callback = False, cheating = False):
         self.fs = sample_rate
         self.base_freq = base_freq
         self.symbol_rate = symbol_rate
         self.tone_spacing = symbol_rate
         self.num_tones = num_tones
         self.callback = callback
+
+        # Cheating mode! Ignore timing estimation and demodulate whenever n is a multiple of the symbol length
+        self.cheating = cheating
 
         #
         self.buffer_size = 4 # Length of the internal buffers used, in symbols.
@@ -126,30 +129,43 @@ class MFSKDemodulator(object):
 
         # Detect the zero crossing of the DFT phase. This indicates that the last (symbol_length) symbols
         # in the buffer contain a symbol.
-        if(dft_energy<0.1 and self.last_dftphase > 6.0):
-            self.hard_decode()
-            self.eval_s2n()
+        if self.cheating:
+            if self.sample_count%self.symbol_length == 0:
+                logging.debug("Cheating..")
+                self.hard_decode()
+                self.eval_s2n()
 
-            self.symbol_gap = 0
+                self.symbol_gap = 0
 
-            symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
-            logging.debug(str(symbol_stats))
-            if self.callback != False:
-                self.callback(symbol_stats)
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                logging.debug(str(symbol_stats))
+                if self.callback != False:
+                    self.callback(symbol_stats) 
+        else:
+            if(dft_energy<0.1 and self.last_dftphase > 6.0):
+                self.hard_decode()
+                self.eval_s2n()
 
-        # Initial attempt at flywheeling when no zero crossings are detected.
-        if self.symbol_gap > self.symbol_length:
-            logging.debug("Flywheeling...")
+                self.symbol_gap = 0
 
-            self.hard_decode()
-            self.eval_s2n()
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                logging.debug(str(symbol_stats))
+                if self.callback != False:
+                    self.callback(symbol_stats)
 
-            self.symbol_gap = 0
+            # Initial attempt at flywheeling when no zero crossings are detected.
+            if self.symbol_gap > self.symbol_length:
+                logging.debug("Flywheeling...")
 
-            symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
-            logging.debug(str(symbol_stats))
-            if self.callback != False:
-                self.callback(symbol_stats)
+                self.hard_decode()
+                self.eval_s2n()
+
+                self.symbol_gap = 0
+
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                logging.debug(str(symbol_stats))
+                if self.callback != False:
+                    self.callback(symbol_stats)
 
         # Increment counters.
         self.symbol_gap += 1
@@ -189,7 +205,7 @@ class MFSKDemodulator(object):
         SNR Estimation, using FFT bin magnitudes. Ported from fldigi.
         """
         sig = np.absolute(self.fft_energy_buffer[:,-1][self.currsymbol])
-        noise = (self.num_tones-1) * np.absolute(self.fft_energy_buffer[:,-1][self.last_symbol2])
+        noise = np.absolute(self.fft_energy_buffer[:,-1][self.last_symbol2]) * (self.num_tones)
         if(noise>0):
             self.s2n = self.decayavg(self.s2n, sig/noise, 16)
             self.s2n_instant = sig/noise
