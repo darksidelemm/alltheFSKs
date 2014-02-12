@@ -47,6 +47,7 @@ class MFSKDemodulator(object):
 
         #
         self.buffer_size = 4 # Length of the internal buffers used, in symbols.
+        self.block_length = 16 # How many samples to process at a time. Higher values will increase speed, but reduce accuracy.
         self.dft_phase_threshold = 0.01
         self.mixing_phase = 0 # So we can mix with constant phase.
         self.sample_count = 0 # Internal counter for testing
@@ -95,8 +96,14 @@ class MFSKDemodulator(object):
 
         # Feed data to symbol_detector, 1 sample at a time.
         # TODO: Make the symbol_detect function process more than on sample at a time.
-        for sample in data:
-            self.symbol_detect(sample)
+
+        #for sample in data:
+        #    self.symbol_detect(sample)
+
+        data = np.reshape(data,(-1,self.block_length))
+
+        for block in data:
+            self.symbol_detect(block)
 
 
 
@@ -107,13 +114,16 @@ class MFSKDemodulator(object):
         TODO: Make this handle multiple samples at a time, with a possible performance hit.
 
         """
+
+
+
         # Roll buffers.
-        self.sample_buffer = np.roll(self.sample_buffer,-1)
+        self.sample_buffer = np.roll(self.sample_buffer,-1*self.block_length)
         self.max_fft_energy_buffer = np.roll(self.max_fft_energy_buffer, -1)
         self.fft_energy_buffer = np.roll(self.fft_energy_buffer, -1, axis=1)
 
         # Add new samples.
-        self.sample_buffer[-1] = samples
+        self.sample_buffer[-1*self.block_length:] = samples
 
         # Calculate FFT over the last (symbol_length) samples in the buffer
         fft_instant = np.fft.fft(self.sample_buffer[-1*self.symbol_length:])
@@ -122,8 +132,10 @@ class MFSKDemodulator(object):
         # Add the maximum bin to the end of another buffer for signal energy detection.
         self.max_fft_energy_buffer[-1] = np.max(np.absolute(self.fft_energy_buffer[:,-1]))
 
+        # If block_length is >1, the fft energy data is effectively downsampled by that factor. 
+
         # Calculate single-point DFT phase at (symbol_rate) Hz over the max fft energy buffer
-        dft_energy = np.angle( self.max_fft_energy_buffer.dot(np.exp(-2*np.pi*1j * (self.symbol_rate/self.fs) * np.arange(0,len(self.max_fft_energy_buffer))))) % (2*np.pi)
+        dft_energy = np.angle( self.max_fft_energy_buffer.dot(np.exp(-2*np.pi*1j * (self.symbol_rate/(self.fs/self.block_length)) * np.arange(0,len(self.max_fft_energy_buffer))))) % (2*np.pi)
         # Save the dft phase value for debugging purposes
         self.dft_phase = np.append(self.dft_phase, dft_energy)
 
@@ -137,18 +149,18 @@ class MFSKDemodulator(object):
 
                 self.symbol_gap = 0
 
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"C"}
                 logging.debug(str(symbol_stats))
                 if self.callback != False:
                     self.callback(symbol_stats) 
         else:
-            if(dft_energy<0.1 and self.last_dftphase > 6.0):
+            if(dft_energy<1.0 and self.last_dftphase > 5.5 and self.symbol_gap > (self.symbol_length*0.8)):
                 self.hard_decode()
                 self.eval_s2n()
 
                 self.symbol_gap = 0
 
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"D"}
                 logging.debug(str(symbol_stats))
                 if self.callback != False:
                     self.callback(symbol_stats)
@@ -162,14 +174,14 @@ class MFSKDemodulator(object):
 
                 self.symbol_gap = 0
 
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant))}
+                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"F"}
                 logging.debug(str(symbol_stats))
                 if self.callback != False:
                     self.callback(symbol_stats)
 
         # Increment counters.
-        self.symbol_gap += 1
-        self.sample_count = self.sample_count + 1
+        self.symbol_gap += self.block_length
+        self.sample_count = self.sample_count + self.block_length
         self.last_dftphase = dft_energy
 
 

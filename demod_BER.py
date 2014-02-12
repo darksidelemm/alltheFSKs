@@ -17,6 +17,7 @@
 # along with this library.  If not, see <http://www.gnu.org/licenses/>.
 
 import numpy as np
+from pylab import *
 import MFSKDemodulator, DePacketizer, MFSKSymbolDecoder, time, MFSKModulator, sys, logging
 from scipy.io import wavfile
 
@@ -28,7 +29,7 @@ cheat_symbol_detect = True
 
 # 16-FSK, 15.625 baud.
 symbol_rate = 15.625
-num_tones = 2
+num_tones = 16
 tone_bits = int(np.log2(num_tones))
 
 # 64-FSK, 15.625 baud.
@@ -42,11 +43,11 @@ tone_bits = int(np.log2(num_tones))
 # tone_bits = 8
 
 # How many symbols to pass through the demodulator?
-num_tests = 2000
-max_errors = 200
+num_tests = 4000
+max_errors = 400
 
-ebno_range = np.arange(0,20,1)
-#ebno_range = np.array([6])
+ebno_range = np.arange(-10,30,1)
+#ebno_range = np.array([10])
 
 
 symbol_length = sample_rate / symbol_rate
@@ -71,11 +72,17 @@ def parse_symbol(data):
     symbol = data["symbol"]
     sample = data["sample"]
     s2n = data["s2n"]
+    timing = data["timing"]
+
+
 
     #symbol_number = int(round(sample/float(expected_symbol_timing)))
     timing_error = sample - int(symbol_length * round(sample/float(symbol_length)))
 
-    expected_symbol = (((n-1))*3)%num_tones
+    if cheat_symbol_detect:
+        expected_symbol = (((n-1))*3)%num_tones
+    else:
+        expected_symbol = (((n))*3)%num_tones
     expected_bits = symb_dec.tone_to_bits(expected_symbol)
 
     #print "N=%d, Expected=%d, Decoded=%d, Timing error=%d, SNR=%d" % (n, expected_symbol , symbol, timing_error, s2n)
@@ -85,10 +92,15 @@ def parse_symbol(data):
     bit_errors = np.sum(np.bitwise_xor(expected_bits, actual_bits))
     errors += bit_errors
 
+    error_string = ""
+
     if bit_errors>0:
-        print "x"*int(bit_errors) ,
+        error_string = "x"*int(bit_errors)
     else:
-        print "."*tone_bits ,
+        error_string = "."*tone_bits
+
+    #print "[%s %d %d %s]" % (timing, timing_error, symbol, error_string) ,
+    print error_string ,
 
     sys.stdout.flush()
 
@@ -139,6 +151,9 @@ for ebno in ebno_range:
     output.append([float(ebno), float(errors)/(bits)])
 
     print ("C %f N %f Es %f No %f Es/No %f dB Eb/No %f dB") % (np.var(signal_log), np.var(noise_log), np.var(signal_log)/symbol_rate, np.var(noise_log)/sample_rate, 10*np.log10((np.var(signal_log)/symbol_rate)/(np.var(noise_log)/sample_rate)), 10*np.log10((np.var(signal_log)/symbol_rate)/(tone_bits*np.var(noise_log)/sample_rate)))
+
+    #plot(demod.dft_phase)
+    #show()
 
 for line in output:
     print "%d, %.4f" % (line[0], line[1])
