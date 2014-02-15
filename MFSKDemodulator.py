@@ -34,13 +34,14 @@ class MFSKDemodulator(object):
                     a symbol is detected.
 
     """
-    def __init__(self, sample_rate=8000, base_freq=1500, symbol_rate=15.625, num_tones = 16, callback = False, cheating = False):
+    def __init__(self, sample_rate=8000, base_freq=1500, symbol_rate=15.625, num_tones = 16, callback = False, gray_coded = True, cheating = False):
         self.fs = sample_rate
         self.base_freq = base_freq
         self.symbol_rate = symbol_rate
         self.tone_spacing = symbol_rate
         self.num_tones = num_tones
         self.callback = callback
+        self.gray_coded = gray_coded
 
         # Cheating mode! Ignore timing estimation and demodulate whenever n is a multiple of the symbol length
         self.cheating = cheating
@@ -53,6 +54,7 @@ class MFSKDemodulator(object):
         self.sample_count = 0 # Internal counter for testing
 
         # Calculate some variables we need.
+        self.sym_bits = int(np.log2(self.num_tones))
         self.symbol_length = int(round(self.fs/self.symbol_rate))
         # Calculate how far we need to move the signal to align it over a FFT bin (usually not far)
         self.mixing_freq = round(self.base_freq/self.symbol_rate)*self.symbol_rate - self.base_freq
@@ -111,11 +113,7 @@ class MFSKDemodulator(object):
         """
         Consumes a sample of data, adding it to a buffer and looking for the beginning of a symbol period.
 
-        TODO: Make this handle multiple samples at a time, with a possible performance hit.
-
         """
-
-
 
         # Roll buffers.
         self.sample_buffer = np.roll(self.sample_buffer,-1*self.block_length)
@@ -127,63 +125,58 @@ class MFSKDemodulator(object):
 
         # Calculate FFT over the last (symbol_length) samples in the buffer
         fft_instant = np.fft.fft(self.sample_buffer[-1*self.symbol_length:])
+
         # Add the relevant bins to a buffer.
+        # TODO: Sum positive and negative frequency bins! Might add 3dB
         self.fft_energy_buffer[:,-1] = fft_instant[self.tone_zero:self.tone_zero+self.num_tones]
         # Add the maximum bin to the end of another buffer for signal energy detection.
         self.max_fft_energy_buffer[-1] = np.max(np.absolute(self.fft_energy_buffer[:,-1]))
 
-        # If block_length is >1, the fft energy data is effectively downsampled by that factor. 
-
-        # Calculate single-point DFT phase at (symbol_rate) Hz over the max fft energy buffer
+        # Calculate single-point DFT phase at (symbol_rate) Hz over the max fft energy buffer.
+        # If block_length is >1, the fft energy data is effectively downsampled by that factor, and we
+        # compensate for that here
         dft_energy = np.angle( self.max_fft_energy_buffer.dot(np.exp(-2*np.pi*1j * (self.symbol_rate/(self.fs/self.block_length)) * np.arange(0,len(self.max_fft_energy_buffer))))) % (2*np.pi)
         # Save the dft phase value for debugging purposes
         self.dft_phase = np.append(self.dft_phase, dft_energy)
 
-        # Detect the zero crossing of the DFT phase. This indicates that the last (symbol_length) symbols
-        # in the buffer contain a symbol.
+        # SYMBOL DETECTION
+
+        # Cheating mode: assume symbols start at sample 0, and have perfect timing.
+        # Useful for 'ideal' performance tests.
         if self.cheating:
             if self.sample_count%self.symbol_length == 0:
                 logging.debug("Cheating..")
-                self.hard_decode()
-                self.eval_s2n()
-
-                self.symbol_gap = 0
-
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"C"}
-                logging.debug(str(symbol_stats))
-                if self.callback != False:
-                    self.callback(symbol_stats) 
+                self.detect_symbol("C")
         else:
+            # Zero crossing symbol detection: Detect the zero crossing of the DFT phase. 
+            # This indicates that the last (symbol_length) symbols in the buffer contain a symbol.
             if(dft_energy<1.0 and self.last_dftphase > 5.5 and self.symbol_gap > (self.symbol_length*0.8)):
-                self.hard_decode()
-                self.eval_s2n()
+                self.detect_symbol("D")
 
-                self.symbol_gap = 0
-
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"D"}
-                logging.debug(str(symbol_stats))
-                if self.callback != False:
-                    self.callback(symbol_stats)
-
-            # Initial attempt at flywheeling when no zero crossings are detected.
+            # Flywheeling: Attempt to detect a symbol when no zero crossing are detected in the last
+            # (symbol_length) samples.
             if self.symbol_gap > self.symbol_length:
                 logging.debug("Flywheeling...")
-
-                self.hard_decode()
-                self.eval_s2n()
-
-                self.symbol_gap = 0
-
-                symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":"F"}
-                logging.debug(str(symbol_stats))
-                if self.callback != False:
-                    self.callback(symbol_stats)
+                self.detect_symbol("F")
 
         # Increment counters.
         self.symbol_gap += self.block_length
         self.sample_count = self.sample_count + self.block_length
         self.last_dftphase = dft_energy
 
+    def detect_symbol(self, timing):
+        """
+        Run the symbol detection routines, and pass decoded data to the callback function.
+        """
+        self.hard_decode()
+        self.eval_s2n()
+
+        self.symbol_gap = 0
+
+        symbol_stats = {"symbol":self.currsymbol, "sample":self.sample_count, "s2n":(20*np.log10(self.s2n)), "s2n_instant":(20*np.log10(self.s2n_instant)), "timing":timing}
+        logging.debug(str(symbol_stats))
+        if self.callback != False:
+            self.callback(symbol_stats)
 
     def hard_decode(self):
         """
@@ -221,6 +214,34 @@ class MFSKDemodulator(object):
         if(noise>0):
             self.s2n = self.decayavg(self.s2n, sig/noise, 16)
             self.s2n_instant = sig/noise
+
+    def soft_decode(self):
+        """
+        Port of fldigi's mfsk::softdecode function to numpy.
+        Produces log-likleyhoods for each bit.
+        """
+        b = np.zeros(self.sym_bits, dtype=float)
+
+        # Iterate over the symbol bins.
+        for i in range(0,self.num_tones):
+            if self.gray_coded:
+                j = gray_decode(i)
+            else:
+                j = i
+
+            # Get the magnitude of this symbol bin.
+            binmag = np.absolute(self.fft_energy_buffer[:,-1][i])
+            # This produces the bits that a symbol represents, as an array of -1's and 1s. There's probably a more 'pythonic' way of doing this
+            symbol_weights = 2*np.unpackbits(np.array([j], dtype=np.uint8)).astype(np.float)[-1*self.sym_bits:] - 1
+            # Then we multiply these bits by the magnitude of the symbol bin, and add it to our total.
+            b += symbol_weights * binmag
+
+        # Now we normalise the values to +- 1.
+        b = b/np.sum(np.absolute(self.fft_energy_buffer[:,-1]))
+        return b
+
+
+
 
 # Test script.
 if __name__ == "__main__":

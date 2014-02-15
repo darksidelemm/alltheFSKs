@@ -47,7 +47,7 @@ num_tests = 4000
 max_errors = 400
 
 ebno_range = np.arange(-10,30,1)
-#ebno_range = np.array([10])
+#ebno_range = np.array([5])
 
 
 symbol_length = sample_rate / symbol_rate
@@ -152,7 +152,7 @@ for ebno in ebno_range:
 
     print ("C %f N %f Es %f No %f Es/No %f dB Eb/No %f dB") % (np.var(signal_log), np.var(noise_log), np.var(signal_log)/symbol_rate, np.var(noise_log)/sample_rate, 10*np.log10((np.var(signal_log)/symbol_rate)/(np.var(noise_log)/sample_rate)), 10*np.log10((np.var(signal_log)/symbol_rate)/(tone_bits*np.var(noise_log)/sample_rate)))
 
-    #plot(demod.dft_phase)
+    #plot(8000.0*np.fft.fftfreq(len(noise_log)),20*np.log10(np.absolute(np.fft.fft(noise_log+signal_log))))
     #show()
 
 for line in output:
