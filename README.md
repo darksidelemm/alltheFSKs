@@ -38,7 +38,5 @@ demod_SER/BER.py - Run error tests for different Eb/No figures, to validate the 
 TODO:
 -----
 - Lots.
-- Speed up the demodulator. Making it process more than one sample at a time is probably a good start.
 - Add frequency tracking, if this is possible to do for MFSK. 
-- Check/fix the Eb/No calculations in the test scripts.
 - Add Interleaving & FEC classes. Might see about pulling in LDPC Coding from CML or some other library.
